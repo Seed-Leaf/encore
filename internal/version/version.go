@@ -42,6 +42,8 @@ func ConfigHash() (string, error) {
 	fmt.Fprintf(h, "APIBaseURL=%s\n", conf.APIBaseURL)
 	fmt.Fprintf(h, "ConfigDir=%s\n", configDir)
 	fmt.Fprintf(h, "EncoreDevDashListenAddr=%s\n", env.EncoreDevDashListenAddr().GetOrElse(""))
+	origins := env.EncoreDevDashRemoteOrigins()
+	fmt.Fprintf(h, "EncoreDevDashRemoteOrigins=%t:%s\n", origins.Present(), origins.GetOrElse(""))
 	fmt.Fprintf(h, "EncoreMCPSSEListenAddr=%s\n", env.EncoreMCPSSEListenAddr().GetOrElse(""))
 	fmt.Fprintf(h, "EncoreObjectStorageListAddr=%s\n", env.EncoreObjectStorageListAddr().GetOrElse(""))
 	fmt.Fprintf(h, "EncoreDebug=%s\n", env.EncoreDebug().GetOrElse(""))

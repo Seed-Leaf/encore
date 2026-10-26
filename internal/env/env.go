@@ -100,6 +100,16 @@ func EncoreDevDashListenAddr() option.Option[string] {
 	return option.None[string]()
 }
 
+// EncoreDevDashRemoteOrigins returns the opt-in remote dashboard origin policy.
+// The dashboard validates the JSON array before opening its listeners. This
+// setting does not authenticate users; remote access requires an SSO proxy.
+func EncoreDevDashRemoteOrigins() option.Option[string] {
+	if value, set := os.LookupEnv("ENCORE_DEVDASH_REMOTE_ORIGINS"); set {
+		return option.Some(value)
+	}
+	return option.None[string]()
+}
+
 // EncoreMCPSSEListenAddr reports the listen address for
 // where the daemon exposes the MCP SSE endpoint.
 // It can be overridden by setting ENCORE_MCPSSE_LISTEN_ADDR.

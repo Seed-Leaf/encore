@@ -115,6 +115,7 @@ type Daemon struct {
 	PublicBuckets *objects.PublicBucketServer
 	Trace         trace2.Store
 	Server        *daemon.Server
+	dashAccess    dash.AccessPolicy
 	dev           bool // whether we're in development mode
 
 	// exit is a channel that shuts down the daemon when sent on.
@@ -126,6 +127,16 @@ type Daemon struct {
 }
 
 func (d *Daemon) init(ctx context.Context) {
+	origins := env.EncoreDevDashRemoteOrigins()
+	if origins.Present() && strings.TrimSpace(origins.GetOrElse("")) == "" {
+		fatalf("invalid ENCORE_DEVDASH_REMOTE_ORIGINS: expected a non-empty JSON array of HTTPS origins; unset the variable for local mode")
+	}
+	access, err := dash.ParseAccessPolicy(origins.GetOrElse(""))
+	if err != nil {
+		fatalf("invalid ENCORE_DEVDASH_REMOTE_ORIGINS: %v", err)
+	}
+	d.dashAccess = access
+
 	d.Daemon = d.listenDaemonSocket()
 	d.Dash = d.listenTCPRetry("dashboard", env.EncoreDevDashListenAddr(), 9400)
 	d.DBProxy = d.listenTCPRetry("dbproxy", option.None[string](), 9500)
@@ -319,8 +330,8 @@ func (d *Daemon) serveObjects() {
 
 func (d *Daemon) serveDash() {
 	log.Info().Stringer("addr", d.Dash.Addr()).Msg("serving dash")
-	srv := dash.NewServer(d.Apps, d.RunMgr, d.NS, d.Trace, d.Dash.Port())
-	d.exit <- http.Serve(d.Dash, httpx.CheckOrigin(httpx.IsNotExternalWebsite, srv))
+	srv := dash.NewServer(d.Apps, d.RunMgr, d.NS, d.Trace, d.Dash.Port(), d.dashAccess)
+	d.exit <- http.Serve(d.Dash, srv)
 }
 
 func (d *Daemon) serveDebug() {

@@ -20,16 +20,15 @@ import (
 	"encr.dev/cli/internal/jsonrpc2"
 	"encr.dev/internal/conf"
 	"encr.dev/pkg/fns"
-	"encr.dev/pkg/httpx"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: httpx.IsNotExternalWebsite,
-}
-
 // NewServer starts a new server and returns it.
-func NewServer(appsMgr *apps.Manager, runMgr *run.Manager, nsMgr *namespace.Manager, tr trace2.Store, dashPort int) *Server {
-	proxy, err := dashproxy.New(conf.DevDashURL)
+func NewServer(appsMgr *apps.Manager, runMgr *run.Manager, nsMgr *namespace.Manager, tr trace2.Store, dashPort int, access AccessPolicy) *Server {
+	newProxy := dashproxy.New
+	if access.Remote() {
+		newProxy = dashproxy.NewRemote
+	}
+	proxy, err := newProxy(conf.DevDashURL)
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not create dash proxy")
 	}
@@ -50,6 +49,7 @@ func NewServer(appsMgr *apps.Manager, runMgr *run.Manager, nsMgr *namespace.Mana
 		traceCh:  make(chan trace2.NewSpanEvent, 10),
 		clients:  make(map[chan<- *notification]struct{}),
 		objects:  &bucketBrowser{apps: appsMgr, run: runMgr, ns: nsMgr},
+		access:   access,
 	}
 
 	runMgr.AddListener(s)
@@ -69,12 +69,32 @@ type Server struct {
 	dashPort int
 	traceCh  chan trace2.NewSpanEvent
 	objects  *bucketBrowser
+	access   AccessPolicy
 
 	mu      sync.Mutex
 	clients map[chan<- *notification]struct{}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if !s.access.AllowRequest(req) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if s.access.Remote() {
+		switch req.URL.Path {
+		case "/__graphql", "/__encore/objects/content":
+			http.Error(w, "unavailable in remote read-only mode", http.StatusForbidden)
+			return
+		case "/__encore":
+			// The WebSocket RPC dispatcher enforces the read-only allowlist.
+		default:
+			if req.Method != http.MethodGet && req.Method != http.MethodHead {
+				w.Header().Set("Allow", "GET, HEAD")
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+		}
+	}
 	switch req.URL.Path {
 	case "/__encore":
 		s.WebSocket(w, req)
@@ -89,6 +109,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 // WebSocket serves the jsonrpc2 API over WebSocket.
 func (s *Server) WebSocket(w http.ResponseWriter, req *http.Request) {
+	upgrader := websocket.Upgrader{CheckOrigin: s.access.AllowRequest}
 	c, err := upgrader.Upgrade(w, req, nil)
 	if err != nil {
 		log.Error().Err(err).Msg("dash: could not upgrade websocket")
@@ -99,7 +120,7 @@ func (s *Server) WebSocket(w http.ResponseWriter, req *http.Request) {
 
 	stream := &wsStream{c: c}
 	conn := jsonrpc2.NewConn(stream)
-	handler := &handler{rpc: conn, apps: s.apps, run: s.run, ns: s.ns, tr: s.tr, objects: s.objects}
+	handler := &handler{rpc: conn, apps: s.apps, run: s.run, ns: s.ns, tr: s.tr, objects: s.objects, readOnly: s.access.Remote()}
 	conn.Go(req.Context(), handler.Handle)
 
 	ch := make(chan *notification, 20)
