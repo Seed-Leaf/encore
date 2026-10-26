@@ -68,10 +68,11 @@ func (p AccessPolicy) AllowRequest(req *http.Request) bool {
 	if !p.Remote() {
 		return httpx.IsNotExternalWebsite(req)
 	}
-	for _, value := range req.Header.Values("Sec-Fetch-Site") {
+	sites := req.Header.Values("Sec-Fetch-Site")
+	for _, value := range sites {
 		for _, site := range strings.Split(value, ",") {
 			if strings.EqualFold(strings.TrimSpace(site), "cross-site") {
-				return false
+				return len(sites) == 1 && value == "cross-site" && len(origins) == 0 && isDashboardNavigation(req)
 			}
 		}
 	}
@@ -84,6 +85,28 @@ func (p AccessPolicy) AllowRequest(req *http.Request) bool {
 	}
 	_, allowed := p.origins[origin]
 	return allowed
+}
+
+// isDashboardNavigation permits top-level links and SSO redirects to the UI.
+// It never admits an API request, WebSocket upgrade, or subresource load. The
+// listener still requires an external authentication proxy for every route.
+func isDashboardNavigation(req *http.Request) bool {
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		return false
+	}
+	if req.Header.Get("Upgrade") != "" {
+		return false
+	}
+	mode, dest := req.Header.Values("Sec-Fetch-Mode"), req.Header.Values("Sec-Fetch-Dest")
+	if len(mode) != 1 || mode[0] != "navigate" || len(dest) != 1 || dest[0] != "document" {
+		return false
+	}
+	switch req.URL.Path {
+	case "/__encore", "/__graphql", "/__encore/objects/content":
+		return false
+	default:
+		return true
+	}
 }
 
 func canonicalHTTPSOrigin(origin string) (string, error) {

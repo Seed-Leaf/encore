@@ -1,0 +1,47 @@
+# Reference configuration. Dokploy's Docker image provider can express the same
+# image, state mount, port and runtime variables without deploying this file.
+services:
+  dashboard:
+    image: ${ENCORE_DASHBOARD_IMAGE:?Set the immutable image repository@sha256 digest}
+    platform: linux/amd64
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    stop_signal: SIGINT
+    stop_grace_period: 30s
+    environment:
+      ENCORE_DEVDASH_REMOTE_ORIGINS: ${ENCORE_DEVDASH_REMOTE_ORIGINS:?Set exact authorized HTTPS origins as a JSON array}
+      ENCORE_DEVDASH_URL: ${ENCORE_DEVDASH_URL:-https://devdash.encore.dev}
+    expose:
+      - "9400"
+    volumes:
+      - dashboard-state:/state
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    networks:
+      - ingress
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      replicas: 1
+      update_config:
+        order: stop-first
+      rollback_config:
+        order: stop-first
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  dashboard-state:
+
+networks:
+  ingress:
+    external: true
+    name: ${ENCORE_DASHBOARD_NETWORK:?Set the private Dokploy ingress network name}

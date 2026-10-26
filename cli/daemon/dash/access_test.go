@@ -104,3 +104,54 @@ func testRemotePolicy(t *testing.T) AccessPolicy {
 	}
 	return p
 }
+
+func TestRemoteCrossSiteNavigation(t *testing.T) {
+	policy := testRemotePolicy(t)
+	for _, tt := range []struct {
+		name, method, path string
+		change             func(http.Header)
+		allow              bool
+	}{
+		{name: "SSO redirect", method: http.MethodGet, path: "/", allow: true},
+		{name: "external deep link", method: http.MethodGet, path: "/app/traces", allow: true},
+		{name: "HEAD navigation", method: http.MethodHead, path: "/", allow: true},
+		{name: "POST", method: http.MethodPost, path: "/"},
+		{name: "origin present", change: func(h http.Header) { h.Set("Origin", "https://dashboard.example.com") }},
+		{name: "empty origin present", change: func(h http.Header) { h.Set("Origin", "") }},
+		{name: "missing mode", change: func(h http.Header) { h.Del("Sec-Fetch-Mode") }},
+		{name: "missing destination", change: func(h http.Header) { h.Del("Sec-Fetch-Dest") }},
+		{name: "subresource", change: func(h http.Header) { h.Set("Sec-Fetch-Mode", "no-cors"); h.Set("Sec-Fetch-Dest", "image") }},
+		{name: "iframe", change: func(h http.Header) { h.Set("Sec-Fetch-Dest", "iframe") }},
+		{name: "websocket mode", change: func(h http.Header) { h.Set("Sec-Fetch-Mode", "websocket") }},
+		{name: "upgrade", change: func(h http.Header) { h.Set("Upgrade", "websocket") }},
+		{name: "multiple sites", change: func(h http.Header) { h.Add("Sec-Fetch-Site", "same-origin") }},
+		{name: "multiple modes", change: func(h http.Header) { h.Add("Sec-Fetch-Mode", "navigate") }},
+		{name: "multiple destinations", change: func(h http.Header) { h.Add("Sec-Fetch-Dest", "document") }},
+		{name: "RPC path", path: "/__encore"},
+		{name: "GraphQL path", path: "/__graphql"},
+		{name: "object path", path: "/__encore/objects/content"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			method, path := tt.method, tt.path
+			if method == "" {
+				method = http.MethodGet
+			}
+			if path == "" {
+				path = "/"
+			}
+			req := httptest.NewRequest(method, "https://dashboard.example.com"+path, nil)
+			req.Header.Set("Sec-Fetch-Site", "cross-site")
+			req.Header.Set("Sec-Fetch-Mode", "navigate")
+			req.Header.Set("Sec-Fetch-Dest", "document")
+			if tt.change != nil {
+				tt.change(req.Header)
+			}
+			if got := policy.AllowRequest(req); got != tt.allow {
+				t.Errorf("AllowRequest = %v, want %v", got, tt.allow)
+			}
+			if (AccessPolicy{}).AllowRequest(req) {
+				t.Error("local policy unexpectedly permits cross-site request")
+			}
+		})
+	}
+}

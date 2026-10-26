@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -16,13 +17,19 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"encr.dev/cli/daemon/dash/dashproxy"
 	"encr.dev/cli/internal/jsonrpc2"
+	"encr.dev/internal/conf"
+	"encr.dev/internal/httpcache"
+	"encr.dev/internal/httpcache/diskcache"
 )
 
 func TestServerHTTPAccess(t *testing.T) {
 	var upstreamCalls atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamCalls.Add(1)
+		w.Header().Add("Content-Security-Policy", "default-src 'self'")
+		w.Header().Add("Content-Security-Policy", "object-src 'none'")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer upstream.Close()
@@ -58,6 +65,13 @@ func TestServerHTTPAccess(t *testing.T) {
 			if rec.Code != tt.want {
 				t.Fatalf("HTTP status = %d, want %d", rec.Code, tt.want)
 			}
+			wantPolicies := []string{"upgrade-insecure-requests"}
+			if tt.want == http.StatusNoContent {
+				wantPolicies = append(wantPolicies, "default-src 'self'", "object-src 'none'")
+			}
+			if got := rec.Header().Values("Content-Security-Policy"); !reflect.DeepEqual(got, wantPolicies) {
+				t.Fatalf("response policies = %v, want %v", got, wantPolicies)
+			}
 			if tt.want >= 400 && upstreamCalls.Load() != before {
 				t.Fatal("denied request reached the upstream")
 			}
@@ -78,6 +92,9 @@ func TestServerHTTPAccess(t *testing.T) {
 		if rec.Code != http.StatusNoContent {
 			t.Fatalf("local POST %s = %d", path, rec.Code)
 		}
+		if got := rec.Header().Values("Content-Security-Policy"); !reflect.DeepEqual(got, []string{"default-src 'self'", "object-src 'none'"}) {
+			t.Fatalf("local response policy changed: %v", got)
+		}
 		req.Header.Set("Origin", "https://evil.test")
 		rec = httptest.NewRecorder()
 		s.ServeHTTP(rec, req)
@@ -94,6 +111,8 @@ func TestServerWebSocketOrigins(t *testing.T) {
 			remote  bool
 			origins []string
 			site    string
+			mode    string
+			dest    string
 			allow   bool
 		}{
 			{name: "remote configured", remote: true, origins: []string{"https://dashboard.example.com"}, allow: true},
@@ -102,6 +121,7 @@ func TestServerWebSocketOrigins(t *testing.T) {
 			{name: "remote localhost not implicit", remote: true, origins: []string{"http://localhost:9400"}},
 			{name: "remote duplicates", remote: true, origins: []string{"https://dashboard.example.com", "https://dashboard.example.com"}},
 			{name: "remote cross-site", remote: true, origins: []string{"https://dashboard.example.com"}, site: "cross-site"},
+			{name: "remote cross-site navigation metadata cannot upgrade", remote: true, site: "cross-site", mode: "navigate", dest: "document"},
 			{name: "local localhost", origins: []string{"http://localhost:9400"}, allow: true},
 			{name: "local absent", allow: true},
 			{name: "local foreign", origins: []string{"https://dashboard.example.com"}},
@@ -127,6 +147,8 @@ func TestServerWebSocketOrigins(t *testing.T) {
 					headers.Add("Origin", origin)
 				}
 				headers.Set("Sec-Fetch-Site", tt.site)
+				headers.Set("Sec-Fetch-Mode", tt.mode)
+				headers.Set("Sec-Fetch-Dest", tt.dest)
 				c, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/__encore", headers)
 				if !tt.allow {
 					if c != nil {
@@ -140,6 +162,13 @@ func TestServerWebSocketOrigins(t *testing.T) {
 				}
 				if err != nil {
 					t.Fatalf("allowed handshake: %v", err)
+				}
+				wantPolicy := ""
+				if tt.remote {
+					wantPolicy = "upgrade-insecure-requests"
+				}
+				if got := resp.Header.Get("Content-Security-Policy"); got != wantPolicy {
+					t.Fatalf("handshake CSP = %q, want %q", got, wantPolicy)
 				}
 				defer c.Close()
 				if err := c.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
@@ -174,6 +203,64 @@ func TestServerWebSocketOrigins(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestRemoteResponsePolicyOnDiskCacheHit(t *testing.T) {
+	oldCache := conf.CacheDevDash
+	conf.CacheDevDash = false
+	t.Cleanup(func() { conf.CacheDevDash = oldCache })
+	var calls atomic.Int64
+	const body = `<script>new WebSocket("ws://" + window.location.host + "/__encore")</script>`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Cache-Control", "public,max-age=3600")
+		w.Header().Add("Content-Security-Policy", "default-src 'self'")
+		w.Header().Add("Content-Security-Policy", "object-src 'none'")
+		_, _ = io.WriteString(w, body)
+	}))
+	defer upstream.Close()
+	proxy, err := dashproxy.NewRemote(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := diskcache.New(t.TempDir())
+	transport := httpcache.NewTransport(cache)
+	transport.Transport = proxy.Transport
+	proxy.Transport = transport
+	s := &Server{access: testRemotePolicy(t), proxy: proxy}
+	for i := 0; i < 3; i++ {
+		if i == 2 {
+			// Security policy belongs to the remote response, not shared cached
+			// assets; a local server must not inherit it from the previous hit.
+			s.access = AccessPolicy{}
+		}
+		req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
+		if i == 0 {
+			// Simulate a browser's top-level navigation after an SSO redirect.
+			req.Header.Set("Sec-Fetch-Site", "cross-site")
+			req.Header.Set("Sec-Fetch-Mode", "navigate")
+			req.Header.Set("Sec-Fetch-Dest", "document")
+		}
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || rec.Body.String() != body {
+			t.Fatalf("response %d: HTTP %d, body %q", i+1, rec.Code, rec.Body.String())
+		}
+		want := []string{"default-src 'self'", "object-src 'none'"}
+		if i != 2 {
+			want = append([]string{"upgrade-insecure-requests"}, want...)
+		}
+		if got := rec.Header().Values("Content-Security-Policy"); !reflect.DeepEqual(got, want) {
+			t.Fatalf("response %d policies = %v, want %v", i+1, got, want)
+		}
+		if i > 0 && rec.Header().Get(httpcache.XFromCache) != "1" {
+			t.Fatalf("response %d did not use the disk cache", i+1)
+		}
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("upstream calls = %d, want 1", got)
 	}
 }
 
