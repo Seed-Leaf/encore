@@ -5,8 +5,9 @@ an internal evaluation service, not a production application control plane. A
 fresh instance has an empty application registry. It does not discover separately
 deployed applications or collect their traces.
 
-The [Dockerfile](../../deploy/dashboard/Dockerfile) packages the source-built CLI,
-Mozilla CA certificates and small startup/health scripts. It deliberately omits
+The [Dockerfile](../../deploy/dashboard/Dockerfile) packages the source-built CLI
+with its embedded remote UI, Mozilla CA certificates and small startup/health
+scripts. It deliberately omits
 the patched Encore Go toolchain, application runtime sources, Node, supervisor
 and Docker client. Those inputs are unnecessary for serving existing dashboard
 metadata; compiling or running applications in this image is unsupported.
@@ -92,7 +93,7 @@ the daemon's duplicate log file goes to `/dev/null` to avoid unbounded log files
 | --- | --- | --- |
 | `/state/config/encore/encore.db` | Daemon registry, metadata, onboarding and trace database | Named volume; sensitive even in read-only serving mode |
 | `/state/config` | Other CLI configuration | Same named volume; do not import machine account credentials |
-| `/state/cache` | Local daemon socket and frontend/cache data | Same named volume; socket is recreated at startup |
+| `/state/cache` | Local daemon socket and daemon caches | Same named volume; socket is recreated; old hosted frontend cache is unused by remote mode |
 | `/state/data` | Reserved local daemon data | Same named volume; no application runtime use in this package |
 | `/state/home` | Nonroot user's home | Same named volume |
 | `/tmp` | Healthcheck response file and temporary files | Writable temporary storage; optional tmpfs |
@@ -117,26 +118,42 @@ its cleanup path; it is not evidence of graceful draining for application jobs.
 
 ## UI availability and health
 
-`ENCORE_DEVDASH_URL` defaults to `https://devdash.encore.dev`. The daemon proxies
-the actual frontend HTML, JavaScript and assets over HTTPS using the image's
-CA bundle. The UI is not bundled or pinned with the CLI, and the external asset
-service remains a runtime dependency. Only use a trusted reviewed replacement
-if changing this URL: its JavaScript executes under the dashboard's origin.
+Remote-mode HTML, JavaScript and CSS are embedded in the CLI from the same
+source revision. The browser loads `/`, `/app.js`, `/rpc.js` and `/styles.css` from the
+protected dashboard origin and opens a same-origin `/__encore` WebSocket using
+`wss://` on HTTPS. There is no remote frontend-upstream setting or Cloud login
+SDK. Remove the obsolete upstream override from the target's Dokploy service
+configuration when upgrading the original hosted-UI deployment. Local-mode
+frontend proxy behavior is unchanged.
 
 The [healthcheck](../../deploy/dashboard/healthcheck.sh) requests `/` through the
-local dashboard listener and requires HTML containing a script element. It first
-requests cached content and fetches through the configured upstream on a cache
-miss. Thus a warm cache can keep the process healthy during an upstream outage;
-this intentionally does not monitor continuous upstream freshness. Normal
-browser requests still use the proxy's cache policy.
+local dashboard listener and requires the owned
+`<meta name="encore-dashboard" content="remote-read-only">` marker. It then
+requests `/app.js` and checks its `encore-remote-read-only-ui` marker, then verifies
+the imported `/rpc.js` transport. All probes stay on localhost, require embedded
+content and have no upstream/cache dependency.
+An older binary serving an unrelated HTML shell no longer passes this check.
 
-A healthy container proves the local HTTP path can serve a UI shell. It does not
+A healthy container proves the local HTTP path can serve the owned UI and script. It does not
 prove JavaScript execution, WebSocket RPC compatibility, SSO authorization or
 deployed application visibility. Before accepting a release, test the actual
 browser page and assets, `version`/`list-apps` over WebSocket, blocked mutation
 RPCs and deep links through the protected hostname. Keep evaluation data free of
 production payloads. All admitted users can see the whole daemon workspace;
 there is no per-application or tenant authorization.
+
+The first deployment's hosted UI selected its Cloud application on the custom
+hostname and stalled on domain-bound Cloud authentication. Its HTML and scripts
+were reachable, so the original generic HTML healthcheck passed despite the
+unusable page. The earlier CSP URL-upgrade workaround addressed mixed-content
+URLs but did not resolve that root cause. The embedded read-only client replaces
+that frontend rather than weakening authentication or the RPC restrictions.
+
+This UI independence does not establish that every daemon feature is offline;
+the daemon retains periodic outbound Encore release checks and its CA certificates.
+Those checks are independent of UI startup. Nor does
+it connect existing application services: an empty workspace must show a clear
+no-registered-apps state. Remote app registration and trace ingestion remain M4.
 
 ## Dokploy Application configuration
 
@@ -151,7 +168,6 @@ service needs. Do not introduce a manually managed host `.env` file.
 | Image | Verified immutable digest for the selected Linux architecture |
 | Start command | Image entrypoint; no command override |
 | Remote origins | `ENCORE_DEVDASH_REMOTE_ORIGINS=["https://dashboard.example.com"]`, replacing the reserved example with the exact bound hostname |
-| UI upstream | Optional `ENCORE_DEVDASH_URL`; default is the public HTTPS asset service |
 | Persistent mount | Dedicated named volume at `/state`; do not share it with another daemon |
 | Replicas/update policy | One replica; stop-first update and rollback |
 | Domain target | Container port 9400 on the private Dokploy ingress network |

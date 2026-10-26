@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -17,11 +16,10 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"encr.dev/cli/daemon/dash/dashproxy"
+	"encr.dev/cli/daemon/dash/remoteui"
+	"encr.dev/cli/daemon/engine/trace2"
+	"encr.dev/cli/daemon/run"
 	"encr.dev/cli/internal/jsonrpc2"
-	"encr.dev/internal/conf"
-	"encr.dev/internal/httpcache"
-	"encr.dev/internal/httpcache/diskcache"
 )
 
 func TestServerHTTPAccess(t *testing.T) {
@@ -41,9 +39,14 @@ func TestServerHTTPAccess(t *testing.T) {
 		method, path, origin string
 		want                 int
 	}{
-		{http.MethodGet, "/", "https://dashboard.example.com", http.StatusNoContent},
-		{http.MethodHead, "/asset.js", "https://dashboard.example.com", http.StatusNoContent},
-		{http.MethodGet, "/asset.js", "", http.StatusNoContent},
+		{http.MethodGet, "/", "https://dashboard.example.com", http.StatusOK},
+		{http.MethodGet, "/apps/example/traces", "https://dashboard.example.com", http.StatusOK},
+		{http.MethodHead, "/app.js", "https://dashboard.example.com", http.StatusOK},
+		{http.MethodGet, "/app.js", "", http.StatusOK},
+		{http.MethodGet, "/rpc.js", "", http.StatusOK},
+		{http.MethodGet, "/styles.css", "", http.StatusOK},
+		{http.MethodGet, "/old-upstream-asset.js", "", http.StatusNotFound},
+		{http.MethodGet, "/__future/api", "", http.StatusNotFound},
 		{http.MethodPost, "/asset.js", "https://dashboard.example.com", http.StatusMethodNotAllowed},
 		{http.MethodDelete, "/asset.js", "https://dashboard.example.com", http.StatusMethodNotAllowed},
 		{http.MethodGet, "/__graphql", "https://dashboard.example.com", http.StatusForbidden},
@@ -65,15 +68,12 @@ func TestServerHTTPAccess(t *testing.T) {
 			if rec.Code != tt.want {
 				t.Fatalf("HTTP status = %d, want %d", rec.Code, tt.want)
 			}
-			wantPolicies := []string{"upgrade-insecure-requests"}
-			if tt.want == http.StatusNoContent {
-				wantPolicies = append(wantPolicies, "default-src 'self'", "object-src 'none'")
-			}
+			wantPolicies := []string{remoteui.ContentSecurityPolicy}
 			if got := rec.Header().Values("Content-Security-Policy"); !reflect.DeepEqual(got, wantPolicies) {
 				t.Fatalf("response policies = %v, want %v", got, wantPolicies)
 			}
-			if tt.want >= 400 && upstreamCalls.Load() != before {
-				t.Fatal("denied request reached the upstream")
+			if upstreamCalls.Load() != before {
+				t.Fatal("remote request reached the upstream")
 			}
 			if tt.want == http.StatusMethodNotAllowed && rec.Header().Get("Allow") != "GET, HEAD" {
 				t.Fatal("method denial missing Allow header")
@@ -165,7 +165,7 @@ func TestServerWebSocketOrigins(t *testing.T) {
 				}
 				wantPolicy := ""
 				if tt.remote {
-					wantPolicy = "upgrade-insecure-requests"
+					wantPolicy = remoteui.ContentSecurityPolicy
 				}
 				if got := resp.Header.Get("Content-Security-Policy"); got != wantPolicy {
 					t.Fatalf("handshake CSP = %q, want %q", got, wantPolicy)
@@ -206,62 +206,33 @@ func TestServerWebSocketOrigins(t *testing.T) {
 	}
 }
 
-func TestRemoteResponsePolicyOnDiskCacheHit(t *testing.T) {
-	oldCache := conf.CacheDevDash
-	conf.CacheDevDash = false
-	t.Cleanup(func() { conf.CacheDevDash = oldCache })
-	var calls atomic.Int64
-	const body = `<script>new WebSocket("ws://" + window.location.host + "/__encore")</script>`
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		w.Header().Set("Content-Type", "text/html")
-		w.Header().Set("Cache-Control", "public,max-age=3600")
-		w.Header().Add("Content-Security-Policy", "default-src 'self'")
-		w.Header().Add("Content-Security-Policy", "object-src 'none'")
-		_, _ = io.WriteString(w, body)
-	}))
-	defer upstream.Close()
-	proxy, err := dashproxy.NewRemote(upstream.URL)
-	if err != nil {
-		t.Fatal(err)
+func TestRemoteServerDoesNotCreateUpstreamProxies(t *testing.T) {
+	s := NewServer(nil, &run.Manager{}, nil, &closedTraceStore{}, 9400, testRemotePolicy(t))
+	if s.proxy != nil || s.apiProxy != nil {
+		t.Fatal("remote server constructed an asset or Cloud proxy")
 	}
-	cache := diskcache.New(t.TempDir())
-	transport := httpcache.NewTransport(cache)
-	transport.Transport = proxy.Transport
-	proxy.Transport = transport
-	s := &Server{access: testRemotePolicy(t), proxy: proxy}
-	for i := 0; i < 3; i++ {
-		if i == 2 {
-			// Security policy belongs to the remote response, not shared cached
-			// assets; a local server must not inherit it from the previous hit.
-			s.access = AccessPolicy{}
-		}
-		req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
-		if i == 0 {
-			// Simulate a browser's top-level navigation after an SSO redirect.
-			req.Header.Set("Sec-Fetch-Site", "cross-site")
-			req.Header.Set("Sec-Fetch-Mode", "navigate")
-			req.Header.Set("Sec-Fetch-Dest", "document")
-		}
-		rec := httptest.NewRecorder()
-		s.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK || rec.Body.String() != body {
-			t.Fatalf("response %d: HTTP %d, body %q", i+1, rec.Code, rec.Body.String())
-		}
-		want := []string{"default-src 'self'", "object-src 'none'"}
-		if i != 2 {
-			want = append([]string{"upgrade-insecure-requests"}, want...)
-		}
-		if got := rec.Header().Values("Content-Security-Policy"); !reflect.DeepEqual(got, want) {
-			t.Fatalf("response %d policies = %v, want %v", i+1, got, want)
-		}
-		if i > 0 && rec.Header().Get(httpcache.XFromCache) != "1" {
-			t.Fatalf("response %d did not use the disk cache", i+1)
-		}
+	// Exercise normal navigation after an SSO redirect, with no proxy available
+	// and an extra policy already installed by outer middleware.
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	rec := httptest.NewRecorder()
+	rec.Header().Add("Content-Security-Policy", "object-src 'none'")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `<meta name="encore-dashboard" content="remote-read-only">`) {
+		t.Fatalf("remote UI without upstream: HTTP %d, missing owned HTML marker", rec.Code)
 	}
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("upstream calls = %d, want 1", got)
+	want := []string{"object-src 'none'", remoteui.ContentSecurityPolicy}
+	if got := rec.Header().Values("Content-Security-Policy"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("response policies = %v, want %v", got, want)
 	}
+}
+
+type closedTraceStore struct{ trace2.Store }
+
+func (*closedTraceStore) Listen(ch chan<- trace2.NewSpanEvent) {
+	close(ch)
 }
 
 func TestRemoteRPCDeniesBeforeParamsOrBackend(t *testing.T) {

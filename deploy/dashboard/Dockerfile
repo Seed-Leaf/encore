@@ -25,7 +25,7 @@ RUN test -n "${SOURCE_REVISION}" && \
     test "${#SOURCE_REVISION}" -eq 40 && \
     case "${SOURCE_REVISION}" in *[!0-9a-f]*) exit 1 ;; esac
 LABEL org.opencontainers.image.title="Encore read-only dashboard" \
-      org.opencontainers.image.description="Development dashboard foundation; external SSO and frontend asset service required" \
+      org.opencontainers.image.description="Embedded read-only development dashboard; external SSO required" \
       org.opencontainers.image.source="https://github.com/Seed-Leaf/encore" \
       org.opencontainers.image.revision="${SOURCE_REVISION}"
 # This pinned Alpine image already includes Mozilla's CA certificate bundle.
@@ -44,7 +44,6 @@ ENV HOME=/state/home \
     ENCORE_DATA_DIR=/state/data \
     ENCORE_DAEMON_LOG_PATH=/dev/null \
     ENCORE_DEVDASH_LISTEN_ADDR=0.0.0.0:9400 \
-    ENCORE_DEVDASH_URL=https://devdash.encore.dev \
     DISABLE_ENCORE_TELEMETRY=1
 WORKDIR /state
 USER 65532:65532

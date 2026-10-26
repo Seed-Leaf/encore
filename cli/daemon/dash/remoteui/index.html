@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="encore-dashboard" content="remote-read-only">
+    <title>Encore · Workspace</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23252d3e'/%3E%3Ctext x='9' y='24' font-family='sans-serif' font-size='26' fill='white'%3Ee%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/styles.css">
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Encore workspace home"><span class="brand-mark" aria-hidden="true">e</span><span>encore<span class="brand-divider">/</span><span class="brand-label">Workspace</span></span></a>
+      <span class="mode-label">Read only</span>
+    </header>
+    <main>
+      <section class="page-heading">
+        <div><p class="eyebrow">SELF-HOSTED DASHBOARD</p><h1>Workspace overview</h1><p class="subtitle">Applications, services, and traces from your Encore daemon.</p></div>
+        <button id="refresh" class="button" type="button">Refresh</button>
+      </section>
+      <section class="connection-bar" aria-label="Daemon connection">
+        <div class="connection-summary"><span id="connection-dot" class="status-dot pending" aria-hidden="true"></span><strong id="connection-state">Connecting</strong><span id="connection-message" role="status">Opening a secure connection to your workspace…</span></div>
+        <span id="daemon-version" class="version">Version pending</span>
+      </section>
+      <div id="workspace-error" class="notice error" role="alert" hidden></div>
+      <section class="workspace-grid">
+        <aside class="panel apps-panel" aria-labelledby="apps-heading">
+          <div class="panel-heading"><h2 id="apps-heading">Applications</h2><span id="app-count" class="count">—</span></div>
+          <div id="app-list" class="app-list"><p class="muted padded">Waiting for the daemon…</p></div>
+          <p class="sidebar-footnote">Apps registered in this workspace.</p>
+        </aside>
+        <section id="workspace-content" class="panel content-panel" aria-live="polite">
+          <div class="empty-state"><span class="empty-symbol" aria-hidden="true">◇</span><h2>Connecting to your workspace</h2><p>Checking your session and application list.</p></div>
+        </section>
+      </section>
+      <footer><span>Workspace data is shared with authorized team members.</span><span id="last-updated">Not yet synchronized</span></footer>
+    </main>
+    <noscript><p class="notice error">JavaScript is required to connect to this dashboard.</p></noscript>
+  </body>
+</html>

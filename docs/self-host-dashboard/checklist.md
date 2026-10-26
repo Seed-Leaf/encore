@@ -23,13 +23,10 @@ before merge; M2–M4 are separate milestones.
 - [x] Exact configured HTTPS origins pass ordinary HTTP and WebSocket admission.
 - [x] Non-allowlisted and malformed Origin values fail both paths.
 - [x] Multiple Origin headers fail; cross-site requests fail except the documented no-Origin top-level navigation.
-- [x] Remote CSP upgrades legacy frontend HTTP/WebSocket URLs and preserves upstream/cache policies.
 - [x] Missing Origin is allowed as documented, with remote restrictions still active.
 - [x] Localhost does not bypass restrictions when remote mode is enabled.
 - [x] `/__graphql` and object-content routes are denied without upstream access.
-- [x] Frontend proxy forwards GET/HEAD only in remote mode.
-- [x] Asset proxy forwards only allowed asset headers; credentials, SSO identity and forwarded headers are absent upstream.
-- [x] Upstream `Set-Cookie` is stripped, including cached response behavior.
+- [x] Remote UI requests permit GET/HEAD only after origin policy.
 - [x] Only the eight documented read RPCs are admitted.
 - [x] SQL, API calls, file/editor access, object operations and mutations are denied before execution.
 - [x] An unknown/new RPC is denied by default.
@@ -51,8 +48,14 @@ before merge; M2–M4 are separate milestones.
 - [ ] Use no production Docker socket, unrelated workspace mounts or ambient credentials.
 - [x] Define Dokploy-owned runtime variables and explicit scope; no application secrets are needed.
 - [ ] Verify browser read views with the current allowlist; list unsupported screens.
-- [x] Inventory Cloud API and asset dependencies; do not claim air-gap support.
-- [ ] Decide whether frontend vendoring or a separate read UI is necessary.
+- [x] Identify hosted UI Cloud selection and domain-bound authentication as incompatible with the custom hostname.
+- [x] Select a purpose-built embedded read-only UI; do not claim all daemon code paths are air-gapped.
+- [ ] Verify remote HTML/CSS/JavaScript are embedded and no asset or Cloud auth upstream is contacted.
+- [x] Verify owned HTML/JavaScript health markers; unrelated HTML and missing assets fail health checks (isolated asset fixtures).
+- [ ] Verify same-origin protocol-aware WebSocket connections, without relying on a CSP URL upgrade.
+- [ ] Verify app/status/trace read views, useful empty states, request errors and reconnection.
+- [ ] Verify existing local mode retains its original frontend and API behavior.
+- [ ] Remove obsolete remote frontend-upstream configuration from the target's Dokploy settings.
 - [ ] Test deep links, static assets and WebSocket reconnect through real HTTPS/SSO.
 - [ ] Verify authorized account access and an available authorized negative test case.
 - [ ] Use only isolated development data; document shared visibility of all workspace apps/traces.
@@ -112,3 +115,25 @@ linking. In an isolated non-root scratch container (amd64 emulation on aarch64):
 Independent code review covered HTTP, WebSocket, RPC, notification and asset-proxy
 boundaries. These checks do not verify SSO, the browser UI, a pinned release image,
 real application compilation, deployment, or production-data handling.
+
+## Hosted UI deployment finding
+
+The packaging follow-up passed HTTP/asset-shell checks and added CSP upgrading
+for the hosted frontend's legacy URLs. Subsequent browser verification on the
+protected custom hostname remained at a loading spinner: the hosted bundle
+selected the Cloud application and attempted authentication bound to the
+upstream domain. Those earlier checks did not establish a usable dashboard.
+
+The embedded UI follow-up must pass the M2 checks above against its own revision.
+Preserve the earlier M0/M1/proxy checks as historical evidence; a successful old
+HTML healthcheck is not acceptance evidence for this replacement.
+
+## Embedded UI package checks — 2026-10-26
+
+Shell linting, Compose configuration validation, documentation links and whitespace
+checks passed for the proposed replacement. The health script was run against
+the actual UI files in isolated non-root Alpine containers with a read-only root
+filesystem, no external network and no published ports. The owned HTML and both
+JavaScript modules passed. A generic hosted HTML shell, a missing `app.js`, and
+a missing `rpc.js` each failed the health check. These are health-script fixture
+checks, not proof of compiled asset embedding, browser execution or SSO acceptance.

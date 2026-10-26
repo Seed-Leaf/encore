@@ -14,7 +14,6 @@ services:
     stop_grace_period: 30s
     environment:
       ENCORE_DEVDASH_REMOTE_ORIGINS: ${ENCORE_DEVDASH_REMOTE_ORIGINS:?Set exact authorized HTTPS origins as a JSON array}
-      ENCORE_DEVDASH_URL: ${ENCORE_DEVDASH_URL:-https://devdash.encore.dev}
     expose:
       - "9400"
     volumes:

@@ -14,6 +14,7 @@ import (
 	"encr.dev/cli/daemon/apps"
 	"encr.dev/cli/daemon/dash/apiproxy"
 	"encr.dev/cli/daemon/dash/dashproxy"
+	"encr.dev/cli/daemon/dash/remoteui"
 	"encr.dev/cli/daemon/engine/trace2"
 	"encr.dev/cli/daemon/namespace"
 	"encr.dev/cli/daemon/run"
@@ -24,18 +25,17 @@ import (
 
 // NewServer starts a new server and returns it.
 func NewServer(appsMgr *apps.Manager, runMgr *run.Manager, nsMgr *namespace.Manager, tr trace2.Store, dashPort int, access AccessPolicy) *Server {
-	newProxy := dashproxy.New
-	if access.Remote() {
-		newProxy = dashproxy.NewRemote
-	}
-	proxy, err := newProxy(conf.DevDashURL)
-	if err != nil {
-		log.Fatal().Err(err).Msg("could not create dash proxy")
-	}
-
-	apiProxy, err := apiproxy.New(conf.APIBaseURL + "/graphql")
-	if err != nil {
-		log.Fatal().Err(err).Msg("could not create graphql proxy")
+	var proxy, apiProxy *httputil.ReverseProxy
+	if !access.Remote() {
+		var err error
+		proxy, err = dashproxy.New(conf.DevDashURL)
+		if err != nil {
+			log.Fatal().Err(err).Msg("could not create dash proxy")
+		}
+		apiProxy, err = apiproxy.New(conf.APIBaseURL + "/graphql")
+		if err != nil {
+			log.Fatal().Err(err).Msg("could not create graphql proxy")
+		}
 	}
 
 	s := &Server{
@@ -104,18 +104,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	case "/__encore/objects/content":
 		s.objects.ServeContent(w, req)
 	default:
-		s.proxy.ServeHTTP(w, req)
+		if s.access.Remote() {
+			remoteui.Handler{}.ServeHTTP(w, req)
+		} else {
+			s.proxy.ServeHTTP(w, req)
+		}
 	}
 }
 
-// addRemoteResponsePolicy upgrades the hosted UI's legacy http:// and ws://
-// URLs when it runs behind HTTPS. A separate CSP policy preserves any policy
-// from the asset upstream, including cached responses, without weakening it.
+// addRemoteResponsePolicy applies the owned UI's policy to every remote
+// response while preserving any additional policies from outer middleware.
 func (s *Server) addRemoteResponsePolicy(header http.Header) {
 	if !s.access.Remote() {
 		return
 	}
-	const policy = "upgrade-insecure-requests"
+	const policy = remoteui.ContentSecurityPolicy
 	for _, existing := range header.Values("Content-Security-Policy") {
 		if existing == policy {
 			return

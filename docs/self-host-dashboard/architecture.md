@@ -16,14 +16,13 @@ flowchart LR
     D --> P[Exact origin and read-only policy]
     P --> R[Allowed JSON-RPC handlers]
     R --> L[Local application and trace stores]
-    P --> U[GET or HEAD frontend asset proxy]
-    U --> F[Configured frontend upstream]
+    P --> U[Embedded read-only HTML CSS and JavaScript]
     P -. denied in remote mode .-> C[Platform GraphQL proxy]
     P -. denied in remote mode .-> O[Object content and mutation operations]
 ```
 
 The diagram describes the required deployment topology. The ingress and SSO
-components are not delivered by M1. The frontend upstream remains a dependency.
+components are external. Remote UI assets are embedded in the CLI release.
 There is no deployed-application registry or runtime collector in this milestone.
 
 ## Boundaries
@@ -33,7 +32,7 @@ There is no deployed-application registry or runtime collector in this milestone
 | HTTPS ingress and SSO proxy | Authenticate every request; authorize the intended team | Entire listener, including HTML, assets, deep links and WebSocket upgrades |
 | Dashboard policy | Validate configured browser origins and restrict methods/routes/RPCs | Defense in depth; never an identity check |
 | Dashboard handlers | Return allowed local status and trace data | No SQL execution, app API invocation, file opening or mutation in remote mode |
-| Frontend proxy | Serve the existing UI through its configured upstream | Only asset request headers forwarded; upstream cookies stripped; UI compatibility unverified |
+| Embedded remote UI | Show local apps, status and stored traces through allowed RPCs | Same-origin assets and WebSocket; no Cloud frontend or authentication SDK |
 | Local daemon stores | Hold registered local apps and traces | Not a production fleet inventory or tenant isolation boundary |
 | Dokploy | Own runtime configuration, ingress and image deployment | No competing configuration authority introduced |
 
@@ -80,22 +79,32 @@ installed or that alternate ingress is closed.
 
 ## UI and platform dependency
 
-The dashboard server currently proxies ordinary frontend paths to
-`ENCORE_DEVDASH_URL`, whose default is `https://devdash.encore.dev`.
-In remote mode the asset proxy forwards only a minimal asset-header allowlist;
-cookies, authorization, SSO identity and forwarded-client headers do not reach
-the upstream. Upstream `Set-Cookie` is removed. This protects the proxy boundary,
-but does not make fetched JavaScript an untrusted or isolated component: frontend
-code still runs under the dashboard origin and needs a separate trust review.
-The proxy caches responses, but a cache is not a reproducible frontend build or
-an air-gap guarantee. See [configuration](../../internal/conf/conf.go) and
-[frontend proxy](../../cli/daemon/dash/dashproxy/dashproxy.go).
+Remote mode serves the fork's [embedded assets](../../cli/daemon/dash/remoteui).
+The browser obtains HTML, CSS and JavaScript from the protected dashboard origin
+and connects to `/__encore` on that same origin. HTTPS pages use `wss://` directly.
+The remote handler does not instantiate the hosted frontend or platform API
+proxy, and the remote package has no frontend-upstream setting. The existing
+local mode continues using its original
+[frontend proxy](../../cli/daemon/dash/dashproxy/dashproxy.go) and configuration.
 
-Remote mode blocks `/__graphql`, which otherwise forwards through the
-[platform API proxy](../../cli/daemon/dash/apiproxy/apiproxy.go). The existing UI
-may depend on that route or on disallowed RPCs. Browser behavior, login redirects,
-deep links, WebSocket reconnection and useful read views must be verified in M2.
-Do not widen the allowlist to make an unreviewed UI request succeed.
+The original deployment proxied a hosted UI that selected the Cloud application
+for a custom hostname. Its Cloud authentication SDK was configured for the
+upstream domain, leaving the page at a loading spinner. The earlier CSP
+`upgrade-insecure-requests` workaround addressed legacy HTTP/WebSocket URLs; it
+could not change that application selection or authentication-domain binding.
+Serving HTML and scripts successfully was therefore insufficient acceptance.
+
+The replacement presents the daemon's local app list, status and stored traces.
+A fresh workspace explicitly says no apps are registered; it does not pretend
+to discover existing Dokploy services. Empty, disconnected and request-error
+states must be visible rather than leaving an indefinite loading indicator.
+Cloud GraphQL, mutations and object content stay denied. Do not widen the RPC
+allowlist to reproduce Cloud-only screens.
+
+This removes the remote UI's Cloud frontend/authentication dependency. It does
+not claim all CLI code paths are offline: the daemon retains periodic outbound
+Encore release checks, independent of UI startup. Browser read views, deep links, WebSocket reconnection and
+SSO session behavior still require M2 acceptance on the selected release.
 
 ## Future deployed-app observation
 

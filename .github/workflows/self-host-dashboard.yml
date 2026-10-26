@@ -37,6 +37,11 @@ jobs:
           for script in deploy/dashboard/*.sh; do
             sh -n "$script"
           done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test remote UI connection lifecycle
+        run: node --test cli/daemon/dash/remoteui/rpc.test.mjs
       - name: Test dashboard access boundaries
         run: go test -mod=readonly -race ./cli/daemon/dash/... ./cli/cmd/encore/daemon ./internal/env ./internal/version ./pkg/httpx
       - name: Build CLI from source

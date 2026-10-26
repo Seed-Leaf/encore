@@ -1,6 +1,7 @@
 # Low-level design
 
-This document defines the M1 contract. Verification status is tracked in the
+This document defines the access boundary and embedded remote UI contract.
+Verification status is tracked in the
 [checklist](checklist.md); documented behavior is not a claim of a successful
 deployment or browser acceptance test.
 
@@ -58,7 +59,7 @@ sequenceDiagram
         RPC->>RPC: Check read-only allowlist before dispatch
         RPC-->>Client: Allowed result or denied method
     else Allowed frontend GET or HEAD
-        HTTP-->>Client: Proxy frontend response
+        HTTP-->>Client: Serve embedded remote UI assets
     else Restricted route or method
         HTTP-->>Client: Reject without upstream/handler call
     end
@@ -82,32 +83,48 @@ before a protected handler or upstream proxy can perform work.
 | `/__encore` | WebSocket protocol subject to shared origin policy and RPC allowlist |
 | `/__graphql` | Denied; no use of the daemon's machine account/platform token |
 | `/__encore/objects/content` | Denied |
-| Frontend proxy paths | GET and HEAD only, after origin policy |
+| Remote UI document and embedded assets | GET and HEAD only, after origin policy |
 | Other methods on frontend paths | Denied before forwarding |
 
 Restrictions apply regardless of whether Origin is present. New route additions
 must be reviewed against this boundary instead of inheriting local capabilities.
 
-For remote static assets, build outbound headers from an allowlist containing
-content negotiation, cache validation and range headers only. Do not forward
-Authorization, cookies, SSO identity headers, forwarded-client headers or arbitrary
-custom headers. Strip `Set-Cookie` from the upstream response. Verify this behavior
-against a local capture server, including responses served through the proxy cache.
+Remote requests are served from embedded files and never forwarded to a frontend
+upstream. Authentication cookies and identity headers therefore have no asset
+server destination. Local-mode proxy behavior is unchanged. The original M1
+proxy credential-scrubbing checks remain historical boundary evidence; they do
+not describe the current remote serving path.
 
-## HTTPS frontend compatibility
+## Embedded remote UI
 
-The hosted frontend currently constructs legacy `http://` and `ws://` URLs from
-the page host. Remote responses add a separate
-`Content-Security-Policy: upgrade-insecure-requests` policy, so an HTTPS browser
-upgrades those connections before mixed-content checks. Existing upstream CSP
-policies, including cached policies, are preserved. Local responses are unchanged.
-The WebSocket handshake also carries the remote response policy.
+The CLI embeds [remoteui](../../cli/daemon/dash/remoteui) at build time. The UI
+document serves from `/`, with `/app.js`, `/rpc.js` and `/styles.css` as same-origin assets.
+Its owned HTML marker is
+`<meta name="encore-dashboard" content="remote-read-only">`; its JavaScript has
+the `encore-remote-read-only-ui` marker. Packaging health checks require those
+markers and the imported RPC transport, so an unrelated hosted HTML shell cannot
+make the container healthy. Embedded responses use `Cache-Control: no-store`;
+an old cached frontend must not survive the release. Unknown asset paths and
+reserved paths do not fall back to the UI document.
 
-This does not enable the blocked GraphQL endpoint or grant a new RPC. Verify the
-actual hosted UI in a browser for every rollout: the frontend is an external
-runtime dependency and can change independently. See the
-[W3C WebSocket upgrade algorithm](https://www.w3.org/TR/upgrade-insecure-requests/#websockets)
-and [deployment contract](deployment.md).
+The client opens `/__encore` on the page's own host, choosing `wss://` for HTTPS
+and `ws://` for HTTP. It uses only existing read RPCs to display the daemon
+version, registered apps, status and stored traces. No Cloud login SDK, platform
+GraphQL call, external script/font or telemetry client is required. Response
+security policy restricts the page to its own assets and permitted connection.
+Data from RPCs must render as text rather than executable markup.
+
+Empty application and trace lists are successful empty states. A new standalone
+dashboard has no registered apps; existing Dokploy services are not automatically
+connected. Connection failures and failed RPCs must produce visible error or
+reconnect states. Browser acceptance must check these states, navigation, trace
+views and reconnection through HTTPS/SSO.
+
+The previous hosted UI selected a Cloud application on the deployment hostname
+and attempted domain-bound Cloud authentication. A CSP URL-upgrade workaround
+could not repair that selection; it did not establish browser compatibility.
+The embedded client removes that dependency without enabling blocked endpoints
+or granting new RPCs. See the [deployment contract](deployment.md).
 
 ## Remote JSON-RPC allowlist
 
@@ -147,9 +164,10 @@ binaries are additional inputs when the selected functionality requires them.
 Do not invoke the upstream release uploader as a local build shortcut; it writes
 to upstream release storage. See [release tooling](../../pkg/releaser/README.md).
 
-The dashboard container needs explicit ownership of its daemon state and cache.
-M2 must define persistent paths, permissions, backup/retention expectations and
-which local apps may be registered. Do not mount a production Docker socket,
+The dashboard-only image includes its remote UI in the source-built CLI and
+omits application toolchains. Its [deployment contract](deployment.md) defines
+state paths, permissions and backup scope. Select a retention/backup schedule
+before storing real data. Do not mount a production Docker socket,
 application credentials or unrelated workspaces merely to make discovery work.
 
 ## Failure and rollback
