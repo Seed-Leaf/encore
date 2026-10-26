@@ -76,6 +76,7 @@ type Server struct {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	s.addRemoteResponsePolicy(w.Header())
 	if !s.access.AllowRequest(req) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
@@ -107,10 +108,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// addRemoteResponsePolicy upgrades the hosted UI's legacy http:// and ws://
+// URLs when it runs behind HTTPS. A separate CSP policy preserves any policy
+// from the asset upstream, including cached responses, without weakening it.
+func (s *Server) addRemoteResponsePolicy(header http.Header) {
+	if !s.access.Remote() {
+		return
+	}
+	const policy = "upgrade-insecure-requests"
+	for _, existing := range header.Values("Content-Security-Policy") {
+		if existing == policy {
+			return
+		}
+	}
+	header.Add("Content-Security-Policy", policy)
+}
+
 // WebSocket serves the jsonrpc2 API over WebSocket.
 func (s *Server) WebSocket(w http.ResponseWriter, req *http.Request) {
+	var responseHeader http.Header
+	if s.access.Remote() {
+		s.addRemoteResponsePolicy(w.Header())
+		// The upgrader writes the handshake directly, bypassing w.Header().
+		responseHeader = w.Header()
+	}
 	upgrader := websocket.Upgrader{CheckOrigin: s.access.AllowRequest}
-	c, err := upgrader.Upgrade(w, req, nil)
+	c, err := upgrader.Upgrade(w, req, responseHeader)
 	if err != nil {
 		log.Error().Err(err).Msg("dash: could not upgrade websocket")
 		return

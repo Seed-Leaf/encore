@@ -32,6 +32,11 @@ jobs:
             printf '%s\n' "$files"
             exit 1
           fi
+      - name: Check dashboard startup scripts
+        run: |
+          for script in deploy/dashboard/*.sh; do
+            sh -n "$script"
+          done
       - name: Test dashboard access boundaries
         run: go test -mod=readonly -race ./cli/daemon/dash/... ./cli/cmd/encore/daemon ./internal/env ./internal/version ./pkg/httpx
       - name: Build CLI from source

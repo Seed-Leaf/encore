@@ -1,7 +1,8 @@
 # Self-hosted dashboard foundation
 
-Status: M0 investigation complete; M1 implemented and locally verified.
-PR checks are required before merge. M2–M4 remain pending.
+Status: M0 investigation and M1 boundary implementation complete (PR #1 merged).
+M2 packaging and HTTPS compatibility are implemented in the deployment follow-up;
+real browser/SSO acceptance and staged activation are tracked separately. M4 is pending.
 Baseline: `bd202f849fe7cd13be9d11b31623f9abd03f06be`.
 
 The goal is a small, internally accessible, read-only dashboard foundation that
@@ -22,6 +23,7 @@ compatibility of that UI with the restricted API is a separate milestone.
 | [Low-level design](implementation.md) | Configuration, HTTP/WebSocket admission and RPC policy |
 | [Roadmap](roadmap.md) | Milestones, deliverables and completion criteria |
 | [Checklist](checklist.md) | Review, test, packaging and staged deployment gates |
+| [Deployment](deployment.md) | Pinned image, state, health, Dokploy settings and rollback |
 
 ## Current scope and future scope
 
@@ -33,7 +35,7 @@ compatibility of that UI with the restricted API is a separate milestone.
 | Preserve default local development behavior when unset | M1 compatibility requirement |
 | Authenticate and authorize users | External SSO proxy; integration acceptance pending |
 | Browser UI, assets and behavior without Cloud dependencies | M2, unverified |
-| Reproducible pinned package and Dokploy runtime configuration | M2 |
+| Pinned dashboard-only package and Dokploy runtime configuration | M2 implemented; release-specific verification required |
 | Staged deployment to an exact verified target | M3, not deployed |
 | Observe separately deployed applications | M4, not implemented |
 | Production control plane, provisioning, deployment automation or multi-tenant RBAC | Outside this foundation |

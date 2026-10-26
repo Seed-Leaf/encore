@@ -6,9 +6,9 @@ the application, UI, ingress or deployment gates that follow it.
 | Milestone | State | Deliverable | Exit criteria |
 | --- | --- | --- | --- |
 | M0 — inspect and build | Complete for source/build investigation | Source map, build/deploy unit distinction, native/Linux CLI and isolated container smoke evidence | Record the exact source/toolchain/binary identities and limits of the checks |
-| M1 — restrict remote access | Implemented; local checks passed, PR checks required | Strict opt-in origins, uniform HTTP/WS policy, read-only RPC allowlist, docs and focused CI | Required tests pass; independent review finds no unguarded dispatch path; local default stays compatible |
-| M2 — package and verify UI | Not started | Pinned image/package, browser acceptance, SSO design, Dokploy config contract | Useful read views work; Cloud/asset dependencies are explicit; auth and alternate-ingress tests pass in an isolated environment |
-| M3 — staged Dokploy deployment | Not started | One exact development target behind verified ingress | Authorized target bound, image verified, SSO and bypass checks pass, rollback evidence retained |
+| M1 — restrict remote access | Merged in PR #1; CI passed | Strict opt-in origins, uniform HTTP/WS policy, read-only RPC allowlist, docs and focused CI | Required tests pass; independent review finds no unguarded dispatch path; local default stays compatible |
+| M2 — package and verify UI | Packaging and HTTPS compatibility implemented; browser acceptance pending | Pinned image/package, browser acceptance, SSO design, Dokploy config contract | Useful read views work; Cloud/asset dependencies are explicit; auth and alternate-ingress tests pass in an isolated environment |
+| M3 — staged Dokploy deployment | Authorized target preparation in progress | One exact development target behind verified ingress | Authorized target bound, image verified, SSO and bypass checks pass, rollback evidence retained |
 | M4 — deployed-app registry | Future | Metadata/trace identity and ingestion design, optional collector | Scope and data/identity contracts reviewed before implementation; no claim of automatic fleet discovery |
 
 ## M1: boundary before exposure
@@ -27,6 +27,12 @@ recorded before marking M1 verified. It does not rely on the upstream workflow's
 `main`/runner assumptions. No CI step publishes or deploys M1.
 
 ## M2: browser, identity and reproducible package
+
+[Deployment packaging](deployment.md) defines a dashboard-only image. Application
+compilation toolchains are explicitly omitted; testing application builds remains
+a separate scope. The remote response policy upgrades the hosted frontend's legacy
+HTTP/WebSocket URLs and permits narrowly scoped SSO return navigation.
+
 
 The existing frontend is still fetched through a proxy. Inventory the endpoints
 and external assets it needs, and test it with the strict allowlist. Record which

@@ -68,7 +68,10 @@ The actual implementation must enforce the same origin decision for ordinary
 HTTP and WebSocket upgrades. A missing Origin is allowed for proxy/non-browser
 traffic; a present malformed or non-allowlisted Origin is denied. Multiple Origin
 headers are rejected in both modes, deliberately tightening malformed local
-requests. Remote requests marked `Sec-Fetch-Site: cross-site` are also denied. Remote mode
+requests. Remote cross-site requests are denied except a no-Origin GET/HEAD
+top-level document navigation (`Sec-Fetch-Mode: navigate`, `Sec-Fetch-Dest: document`).
+This narrow exception permits external links and SSO return navigation; it excludes
+reserved API routes, WebSocket upgrades, frames and subresources. Remote mode
 must not inherit a general localhost exception. Policy decisions must occur
 before a protected handler or upstream proxy can perform work.
 
@@ -90,6 +93,21 @@ content negotiation, cache validation and range headers only. Do not forward
 Authorization, cookies, SSO identity headers, forwarded-client headers or arbitrary
 custom headers. Strip `Set-Cookie` from the upstream response. Verify this behavior
 against a local capture server, including responses served through the proxy cache.
+
+## HTTPS frontend compatibility
+
+The hosted frontend currently constructs legacy `http://` and `ws://` URLs from
+the page host. Remote responses add a separate
+`Content-Security-Policy: upgrade-insecure-requests` policy, so an HTTPS browser
+upgrades those connections before mixed-content checks. Existing upstream CSP
+policies, including cached policies, are preserved. Local responses are unchanged.
+The WebSocket handshake also carries the remote response policy.
+
+This does not enable the blocked GraphQL endpoint or grant a new RPC. Verify the
+actual hosted UI in a browser for every rollout: the frontend is an external
+runtime dependency and can change independently. See the
+[W3C WebSocket upgrade algorithm](https://www.w3.org/TR/upgrade-insecure-requests/#websockets)
+and [deployment contract](deployment.md).
 
 ## Remote JSON-RPC allowlist
 

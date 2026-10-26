@@ -22,7 +22,8 @@ before merge; M2–M4 are separate milestones.
 - [x] Configuration failure occurs before any daemon listener opens.
 - [x] Exact configured HTTPS origins pass ordinary HTTP and WebSocket admission.
 - [x] Non-allowlisted and malformed Origin values fail both paths.
-- [x] Multiple Origin headers and remote `Sec-Fetch-Site: cross-site` requests fail.
+- [x] Multiple Origin headers fail; cross-site requests fail except the documented no-Origin top-level navigation.
+- [x] Remote CSP upgrades legacy frontend HTTP/WebSocket URLs and preserves upstream/cache policies.
 - [x] Missing Origin is allowed as documented, with remote restrictions still active.
 - [x] Localhost does not bypass restrictions when remote mode is enabled.
 - [x] `/__graphql` and object-content routes are denied without upstream access.
@@ -40,15 +41,17 @@ before merge; M2–M4 are separate milestones.
 
 ## M2 package and browser acceptance
 
-- [ ] Pin source, runtime, patched Go and optional native binaries.
+- [x] Pin dashboard runtime and Go builder images; define committed source and binary provenance.
+- [ ] Pin patched Go/optional runtimes if application compilation is later added (omitted from this dashboard-only image).
 - [ ] CLI version identifies the fork commit without spoofing an upstream release.
 - [ ] Build and smoke-test the selected Linux image; retain its digest and source identity.
 - [ ] Verify any target Go application build independently from the CLI.
-- [ ] Define state/cache persistence, permissions, retention and backup/restore scope.
+- [x] Define state/cache persistence, permissions and backup/restore scope in the deployment contract.
+- [ ] Select retention/backup scheduling before storing real application data.
 - [ ] Use no production Docker socket, unrelated workspace mounts or ambient credentials.
-- [ ] Define Dokploy-owned runtime variables/secrets and explicit references.
+- [x] Define Dokploy-owned runtime variables and explicit scope; no application secrets are needed.
 - [ ] Verify browser read views with the current allowlist; list unsupported screens.
-- [ ] Inventory Cloud API and asset dependencies; do not claim air-gap support.
+- [x] Inventory Cloud API and asset dependencies; do not claim air-gap support.
 - [ ] Decide whether frontend vendoring or a separate read UI is necessary.
 - [ ] Test deep links, static assets and WebSocket reconnect through real HTTPS/SSO.
 - [ ] Verify authorized account access and an available authorized negative test case.
