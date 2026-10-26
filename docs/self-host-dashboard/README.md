@@ -1,19 +1,21 @@
 # Self-hosted dashboard foundation
 
 Status: M0 investigation and M1 boundary implementation complete (PR #1 merged).
-M2 packaging and HTTPS compatibility are implemented in the deployment follow-up;
-real browser/SSO acceptance and staged activation are tracked separately. M4 is pending.
+M2 packaging is implemented. The first protected deployment exposed a hosted-UI
+compatibility failure; this follow-up replaces that UI with an embedded read-only
+client. Browser/SSO acceptance must be repeated for the replacement. M4 is pending.
 Baseline: `bd202f849fe7cd13be9d11b31623f9abd03f06be`.
 
 The goal is a small, internally accessible, read-only dashboard foundation that
-can eventually run behind an authenticated Dokploy ingress. Start with the
+can run behind an authenticated Dokploy ingress. Start with the
 existing development daemon and its local application/trace model. Extend the
 boundary deliberately before adding deployed application discovery or operations.
 
-This work does not recreate Encore Cloud. It does not establish a standalone,
-air-gapped UI, production readiness, or a deployment to an existing service.
-The current dashboard still proxies its frontend assets from another server;
-compatibility of that UI with the restricted API is a separate milestone.
+Remote mode serves a purpose-built HTML/CSS/JavaScript UI embedded in the CLI.
+Its assets and read views need no Encore Cloud frontend or Cloud authentication
+SDK. External SSO still authenticates users. This work does not recreate Encore
+Cloud or establish production readiness or an air-gap guarantee for the daemon.
+The original local mode retains its existing hosted frontend.
 
 ## Design and execution
 
@@ -34,9 +36,9 @@ compatibility of that UI with the restricted API is a separate milestone.
 | Restrict remote sessions to an explicit read-only RPC allowlist | M1 implemented; raw process output suppressed |
 | Preserve default local development behavior when unset | M1 compatibility requirement |
 | Authenticate and authorize users | External SSO proxy; integration acceptance pending |
-| Browser UI, assets and behavior without Cloud dependencies | M2, unverified |
+| Remote UI assets and read views independent of the Cloud frontend | Embedded client in this follow-up; browser acceptance required |
 | Pinned dashboard-only package and Dokploy runtime configuration | M2 implemented; release-specific verification required |
-| Staged deployment to an exact verified target | M3, not deployed |
+| Staged deployment to an exact verified target | First target activated; UI repair and acceptance remain pending |
 | Observe separately deployed applications | M4, not implemented |
 | Production control plane, provisioning, deployment automation or multi-tenant RBAC | Outside this foundation |
 
@@ -82,8 +84,9 @@ and artifact storage contracts remain outside this change.
 | Dashboard HTTP and WebSocket routes | [server.go](../../cli/daemon/dash/server.go) |
 | Remote origin and RPC allowlist policy | [access.go](../../cli/daemon/dash/access.go) |
 | Dashboard JSON-RPC handlers | [dash.go](../../cli/daemon/dash/dash.go) |
-| Frontend upstream and platform configuration | [conf.go](../../internal/conf/conf.go) |
-| Cached frontend proxy | [dashproxy.go](../../cli/daemon/dash/dashproxy/dashproxy.go) |
+| Embedded remote UI assets | [remoteui](../../cli/daemon/dash/remoteui) |
+| Local frontend upstream and platform configuration | [conf.go](../../internal/conf/conf.go) |
+| Original local frontend proxy | [dashproxy.go](../../cli/daemon/dash/dashproxy/dashproxy.go) |
 | Platform GraphQL proxy | [apiproxy.go](../../cli/daemon/dash/apiproxy/apiproxy.go) |
 | Application image export | [export.go](../../cli/daemon/export/export.go) |
 | Fork validation workflow | [self-host-dashboard.yml](../../.github/workflows/self-host-dashboard.yml) |

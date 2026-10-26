@@ -2,14 +2,15 @@
 set -eu
 
 page=$(mktemp /tmp/encore-dashboard-health.XXXXXX)
-trap 'rm -f "$page"' EXIT HUP INT TERM
+script=$(mktemp /tmp/encore-dashboard-script.XXXXXX)
+trap 'rm -f "$page" "$script"' EXIT HUP INT TERM
 
-# Request through the actual dashboard proxy. A cached page is sufficient for
-# liveness; warm a cold cache via the configured HTTPS upstream if needed.
-# This does not assert browser/JavaScript, SSO or WebSocket acceptance.
-if ! wget -q -T 4 -O "$page" --header 'Cache-Control: only-if-cached' \
-    http://127.0.0.1:9400/ 2>/dev/null; then
-    wget -q -T 4 -O "$page" http://127.0.0.1:9400/ 2>/dev/null
-fi
-grep -Eiq '<!doctype[[:space:]]+html|<html([[:space:]>])' "$page"
-grep -Eiq '<script([[:space:]>])' "$page"
+# Require the owned embedded UI and its JavaScript, not an arbitrary HTML shell
+# from a hosted dashboard. All requests stay on the local listener; there is
+# no asset upstream/cache dependency. Browser, SSO and RPC checks remain separate.
+wget -q -T 3 -O "$page" http://127.0.0.1:9400/ 2>/dev/null
+grep -Fq '<meta name="encore-dashboard" content="remote-read-only">' "$page"
+wget -q -T 3 -O "$script" http://127.0.0.1:9400/app.js 2>/dev/null
+grep -Fq 'encore-remote-read-only-ui' "$script"
+wget -q -T 3 -O "$script" http://127.0.0.1:9400/rpc.js 2>/dev/null
+grep -Fq 'export class DashboardRPC' "$script"
