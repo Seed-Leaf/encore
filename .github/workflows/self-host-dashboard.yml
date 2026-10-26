@@ -1,0 +1,40 @@
+name: Self-host dashboard
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-host-dashboard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard:
+    name: Dashboard policy and CLI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v4
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Check formatting
+        shell: bash
+        run: |
+          files=$(gofmt -l cli/daemon/dash cli/cmd/encore/daemon internal/env internal/version pkg/httpx)
+          if [[ -n "$files" ]]; then
+            printf '%s\n' "$files"
+            exit 1
+          fi
+      - name: Test dashboard access boundaries
+        run: go test -mod=readonly -race ./cli/daemon/dash/... ./cli/cmd/encore/daemon ./internal/env ./internal/version ./pkg/httpx
+      - name: Build CLI from source
+        run: go build -mod=readonly -o "$RUNNER_TEMP/encore" ./cli/cmd/encore
+      - name: Check CLI entry point
+        run: '"$RUNNER_TEMP/encore" --help'

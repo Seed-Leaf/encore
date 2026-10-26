@@ -36,12 +36,13 @@ import (
 const maxTraceListLimit = 500
 
 type handler struct {
-	rpc     jsonrpc2.Conn
-	apps    *apps.Manager
-	run     *run.Manager
-	ns      *namespace.Manager
-	tr      trace2.Store
-	objects *bucketBrowser
+	rpc      jsonrpc2.Conn
+	apps     *apps.Manager
+	run      *run.Manager
+	ns       *namespace.Manager
+	tr       trace2.Store
+	objects  *bucketBrowser
+	readOnly bool
 }
 
 func (h *handler) GetMeta(appID string) (*meta.Data, error) {
@@ -89,6 +90,9 @@ func resolveNamespace(ctx context.Context, runMgr *run.Manager, appsMgr *apps.Ma
 }
 
 func (h *handler) Handle(ctx context.Context, reply jsonrpc2.Replier, r jsonrpc2.Request) error {
+	if h.readOnly && !remoteReadMethod(r.Method()) {
+		return reply(ctx, nil, fmt.Errorf("%w: unavailable in remote read-only mode", jsonrpc2.ErrMethodNotFound))
+	}
 	reply = makeProtoReplier(reply)
 
 	unmarshal := func(dst interface{}) error {
@@ -533,6 +537,9 @@ func (h *handler) listenNotify(ctx context.Context, ch <-chan *notification) {
 		case <-ctx.Done():
 			return
 		case r := <-ch:
+			if h.readOnly && r.Method == "process/output" {
+				continue
+			}
 			if err := h.rpc.Notify(ctx, r.Method, r.Params); err != nil {
 				return
 			}
